@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <!-- Material Design Lite -->
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap">
+        <link rel="stylesheet" href="https://cdn.materialdesignicons.com/5.4.55/css/materialdesignicons.min.css">
+        <link rel="stylesheet" href="https://code.getmdl.io/1.3.0/material.indigo-pink.min.css">
+        <script defer src="https://code.getmdl.io/1.3.0/material.min.js"></script>
+        <style>
+            .page-content {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                flex-direction: column;
+            }
+            
+            .drop-zone {
+                cursor: pointer;
+                padding: 20px;
+                border: 2px dashed #8b159b;
+                color: #8b159b;
+                font-weight: bold;
+                text-align: center;
+                margin: 20px;
+                position: relative;
+                overflow: hidden;
+            }
+            
+            .drop-zone:hover {
+                background-color: #ffffff;
+            }
+
+            .progress-container {
+                width: 75%;
+                max-width: 800px;
+                margin-top: 20px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .progress-bar {
+                width: 100%;
+                height: 20px;
+                background-color: #000000;
+                margin-top: 10px;
+            }
+
+            .progress-bar-fill {
+                width: 0%;
+                height: 100%;
+                background-color: #8b159b;
+                transition: width 0.3s ease-in-out;
+            }
+
+            .progress-label {
+                margin-top: 5px;
+                font-weight: bold;
+            }
+
+            .file-name {
+                margin-top: 20px;
+            }
+
+            .search-form {
+            width: 100%;
+            max-width: 600px;
+            margin: 20px auto;
+            display: flex;
+            text-align: center;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mdl-textfield {
+            width: 100%;
+            margin-right: 10px;
+        }
+
+        .mdl-textfield__input {
+            font-size: 16px;
+            padding: 10px;
+            border-radius: 2px;
+        }
+
+        .mdl-button {
+            font-size: 16px;
+            padding: 10px 20px;
+            border-radius: 2px;
+            text-align: center;
+        }
+
+        .h1 {
+            color: #8b159b;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        </style>
+    </head>
+
+    <body>
+        <form id="searchForm" class="search-form">
+            <div class="mdl-textfield mdl-js-textfield">
+                <input class="mdl-textfield__input" type="text" id="searchQuery" name="query" placeholder="Enter File Name">
+            </div>
+            <button class="mdl-button mdl-js-button mdl-button--raised mdl-js-ripple-effect mdl-button--primary" type="submit" text-align: center; >Search</button>
+        </form>
+
+    <script>
+        document.getElementById('searchForm').addEventListener('submit', function (event) {
+            event.preventDefault();  // Prevent the form from submitting the traditional way
+
+            let query = document.getElementById('searchQuery').value;
+
+            fetch('/search', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ query: query })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Response from server:', data);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        });
+    </script>
+        <div class="mdl-layout mdl-js-layout mdl-layout--fixed-header">
+            <main class="mdl-layout__content">
+                <div class="page-content">
+                    <div id="drop_zone_files" class="drop-zone mdl-button mdl-js-button mdl-button--raised mdl-js-ripple-effect">
+                        Drop files here or click to upload files
+                        <input type="file" id="fileInputFiles" multiple="multiple" hidden onchange="handleFileSelect(event)">
+                    </div>
+                    <div id="drop_zone_folders" class="drop-zone mdl-button mdl-js-button mdl-button--raised mdl-js-ripple-effect">
+                        Drop folder here or click to upload folder
+                        <input type="file" id="fileInputFolders" webkitdirectory hidden onchange="handleFileSelect(event)">
+                    </div>
+
+                    <div class="progress-container">
+                        <span id="fileProgressLabel" class="progress-label">File Progress: 0%</span>
+                        <div class="progress-bar">
+                            <div id="fileProgressBar" class="progress-bar-fill"></div>
+                        </div>
+
+                        <span id="overallProgressLabel" class="progress-label">Overall Progress: 0%</span>
+                        <div class="progress-bar">
+                            <div id="overallProgressBar" class="progress-bar-fill"></div>
+                        </div>
+                    </div>
+
+                    <span id="fileName" class="file-name"></span>
+                </div>
+            </main>
+        </div>
+
+        <script>
+            const MAX_CONCURRENT_UPLOADS = 10;
+            let totalFiles = 0;
+            let filesUploaded = 0;
+            let partsUploaded = 0;
+            let totalParts = 0;
+
+            document.getElementById('drop_zone_files').addEventListener('click', function() {
+                document.getElementById('fileInputFiles').click();
+            });
+
+            document.getElementById('drop_zone_folders').addEventListener('click', function() {
+                document.getElementById('fileInputFolders').click();
+            });
+
+            async function handleFileSelect(event) {
+                event.stopPropagation();
+                event.preventDefault();
+
+                let files = event.target.files ? event.target.files : event.dataTransfer.files;
+                let fileArray = Array.from(files).filter(file => !file.webkitRelativePath.includes('/.'));
+
+                // Collect files in subfolder-first order
+                let folderStructure = collectFilesByFolder(fileArray);
+
+                totalFiles = fileArray.length;
+                filesUploaded = 0;
+                partsUploaded = 0;
+                totalParts = 0;
+                updateProgressBar(0, 'overall');
+
+                // Queue to process files in order, ensuring files in subfolders are uploaded first
+                for (let folder of Object.keys(folderStructure)) {
+                    let folderFiles = folderStructure[folder];
+                    for (let i = 0; i < folderFiles.length; i++) {
+                        await uploadFileOrSplit(folderFiles[i]);
+                        filesUploaded++;
+                        updateProgressBar((filesUploaded / totalFiles) * 100, 'overall');
+                    }
+                }
+
+                document.getElementById('fileName').textContent = 'All uploads completed!';
+            }
+
+            // Function to group files by folder paths
+            function collectFilesByFolder(fileArray) {
+                let folderStructure = {};
+
+                fileArray.forEach(file => {
+                    let folderPath = file.webkitRelativePath.substring(0, file.webkitRelativePath.lastIndexOf('/'));
+
+                    if (!folderStructure[folderPath]) {
+                        folderStructure[folderPath] = [];
+                    }
+
+                    folderStructure[folderPath].push(file);
+                });
+
+                return folderStructure;
+            }
+
+            function splitFile(file, chunkSize) {
+                let parts = [];
+                let size = file.size;
+                for (let i = 0; i < size; i += chunkSize) {
+                    let part = file.slice(i, Math.min(size, i + chunkSize));
+                    parts.push(part);
+                }
+                return parts;
+            }
+
+            async function uploadFileOrSplit(file) {
+                let chunkSize = 25 * 1024 * 1024; // 25 MB discord file size limit (for now >:(    )
+                let parts = file.size > chunkSize ? splitFile(file, chunkSize) : [file];
+                totalParts = parts.length;
+                partsUploaded = 0;
+                updateProgressBar(0, 'file');
+
+                await uploadPartsConcurrently(parts, file.name);
+            }
+
+            async function uploadPartsConcurrently(parts, originalFileName) {
+                let promises = [];
+                for (let index = 0; index < parts.length; index++) {
+                    promises.push(uploadPart(parts[index], originalFileName, index + 1, parts.length));
+                }
+                await Promise.all(promises);
+            }
+
+            function uploadPart(part, originalFileName, partIndex, totalParts) {
+                return new Promise((resolve, reject) => {
+                    let formData = new FormData();
+                    formData.append('file', part, `${originalFileName}.part${partIndex}`);
+
+                    fetch('/upload', {
+                        method: 'POST',
+                        body: formData,
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        document.getElementById('fileName').textContent = `Uploaded part ${partIndex} of ${totalParts} for ${originalFileName}`;
+                        partsUploaded++;
+                        updateProgressBar((partsUploaded / totalParts) * 100, 'file');
+                        resolve();
+                    })
+                    .catch(error => {
+                        console.error('Error uploading part', partIndex, error);
+                        document.getElementById('fileName').textContent = 'Error uploading part ' + partIndex;
+                        reject(error);
+                    });
+                });
+            }
+
+            function updateProgressBar(percentage, type) {
+                if (type === 'file') {
+                    document.getElementById('fileProgressLabel').textContent = `File Progress: ${Math.round(percentage)}%`;
+                    document.getElementById('fileProgressBar').style.width = `${percentage}%`;
+                } else if (type === 'overall') {
+                    document.getElementById('overallProgressLabel').textContent = `Overall Progress: ${Math.round(percentage)}%`;
+                    document.getElementById('overallProgressBar').style.width = `${percentage}%`;
+                }
+            }
+
+            // Drag and drop support for files
+            document.getElementById('drop_zone_files').addEventListener('dragover', function(event) {
+                event.stopPropagation();
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'copy';
+            });
+
+            document.getElementById('drop_zone_folders').addEventListener('dragover', function(event) {
+                event.stopPropagation();
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'copy';
+            });
+
+            document.getElementById('drop_zone_files').addEventListener('drop', handleFileSelect);
+            document.getElementById('drop_zone_folders').addEventListener('drop', handleFileSelect);
+        </script>
+
+    </body>
+</html>
