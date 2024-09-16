@@ -14,7 +14,7 @@ import csv
 
 app = Flask(__name__)
 
-BOT_TOKEN = 'YOUR BOT TOKEN' #Replace with your bot token
+BOT_TOKEN = 'YOUT BOT TOKEN' #Replace with your bot token
 CHANNEL_ID = 0 #Replace with your channel ID
 WEBPAGE_IP = '127.0.0.2'
 PORT = '5000'
@@ -48,6 +48,18 @@ def search_csv_file(search_text, exclude_keywords, input_file=csv_file_path):
                     matching_message_and_user_ids.append((message_id, timestamp, user_id, content, line_number))
                     found = True
     return matching_message_and_user_ids
+
+def search_csv_for_message(query):
+    results = []
+    # Open the CSV file and search for the query in the last column
+    with open(csv_file_path, mode='r', newline='', encoding='utf-8') as csvfile:
+        csvreader = csv.reader(csvfile)
+        for row in csvreader:
+            # Assuming the content is in the last column of each row
+            content = row[3]
+            if query.lower() in content.lower():
+                results.append(content)
+    return results
 
 def get_last_timestamp_from_csv(file_path):
     try:
@@ -184,16 +196,20 @@ async def download_files_from(channel, starting_message, *, query : str):
 
 @app.route('/search', methods=['POST'])
 def search():
-    start_time = time.time()
-    st = start_time
-    data = request.get_json()
-    search_query = data.get('query')
-    if search_query:
-        # Run the asynchronous function in the client's event loop
-        asyncio.run_coroutine_threadsafe(search_message(query=search_query), client.loop)
-        return jsonify({"message": f"Query received: {search_query}"}), 200
-    else:
-        return jsonify({"error": "No query received"}), 400
+    query = request.form.get('query')
+    if query:
+        results = search_csv_for_message(query)
+        return render_template('index.html', results=results, query=query)
+    return render_template('index.html', results=[], query='')
+
+@app.route('/store_click', methods=['POST'])
+def store_click():
+    global clicked_message
+    clicked_message = request.json.get('clicked_message')
+    print(f"Clicked message stored: {clicked_message}")
+    if clicked_message:
+        asyncio.run_coroutine_threadsafe(search_message(query=clicked_message), client.loop)
+    return jsonify({'status': 'success', 'message': 'Message stored successfully'})
 
 lock = asyncio.Lock()
 
