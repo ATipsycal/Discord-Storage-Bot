@@ -9,8 +9,8 @@
         <style>
             .page-content {
                 display: flex;
-                justify-content: center;
-                align-items: center;
+                justify-content: left;
+                align-items: left;
                 height: 100vh;
                 flex-direction: column;
             }
@@ -33,7 +33,7 @@
 
             .progress-container {
                 width: 75%;
-                max-width: 800px;
+                max-width: 500px;
                 margin-top: 20px;
                 display: flex;
                 flex-direction: column;
@@ -45,6 +45,7 @@
                 height: 20px;
                 background-color: #000000;
                 margin-top: 10px;
+                align-items: center;
             }
 
             .progress-bar-fill {
@@ -74,7 +75,7 @@
         }
 
         .mdl-textfield {
-            width: 100%;
+            width: 50%;
             margin-right: 10px;
         }
 
@@ -99,48 +100,78 @@
             position: relative;
             overflow: hidden;
         }
+        .section1{
+	        background-color:#ffffff;
+	        width:60%;
+	        float:left;
+	        height:100vh;
+            margin:0;
+            padding:0;	
+        }
+        .section2{
+	        background-color:#ffffff;
+	        width:40%;
+	        float:left;
+	        height:100vh;
+	        margin:0;
+	        padding:0;
+            align-items: center;
+        }
+        .lowwdidth
+        {
+            width:30%;
+        }
+        
 
         </style>
     </head>
 
     <body>
-        <form id="searchForm" class="search-form">
-            <div class="mdl-textfield mdl-js-textfield">
-                <input class="mdl-textfield__input" type="text" id="searchQuery" name="query" placeholder="Enter File Name">
-            </div>
-            <button class="mdl-button mdl-js-button mdl-button--raised mdl-js-ripple-effect mdl-button--primary" type="submit" text-align: center; >Search</button>
+        <div class = "section1">
+        <form action="/search" method="POST">
+            <input type="text" name="query" placeholder="Search..." value="{{ query }}" required>
+            <button type="submit">Search</button>
         </form>
-
-    <script>
-        document.getElementById('searchForm').addEventListener('submit', function (event) {
-            event.preventDefault();  // Prevent the form from submitting the traditional way
-
-            let query = document.getElementById('searchQuery').value;
-
-            fetch('/search', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ query: query })
-            })
-            .then(response => response.json())
-            .then(data => {
-                console.log('Response from server:', data);
-            })
-            .catch(error => {
-                console.error('Error:', error);
-            });
-        });
-    </script>
+    
+        {% if results %}
+            <h2>Results for "{{ query }}"</h2>
+            <ul>
+                {% for result in results %}
+                    <li><a href="#" onclick="storeClickedMessage('{{ result }}')">{{ result }}</a></li>
+                {% endfor %}
+            </ul>
+        {% elif query %}
+            <p>No results found for "{{ query }}".</p>
+        {% endif %}
+        </div>
+        <script>
+            // Function to send the clicked message to the Flask backend
+            function storeClickedMessage(clickedMessage) {
+                fetch('/store_click', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ clicked_message: clickedMessage })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Message stored:', data.message);
+                })
+                .catch((error) => {
+                    console.error('Error:', error);
+                });
+            }
+        </script>
+        <div class = "section2">
         <div class="mdl-layout mdl-js-layout mdl-layout--fixed-header">
             <main class="mdl-layout__content">
                 <div class="page-content">
-                    <div id="drop_zone_files" class="drop-zone mdl-button mdl-js-button mdl-button--raised mdl-js-ripple-effect">
+                    <div id="drop_zone_files" class="drop-zone mdl-button mdl-js-button mdl-button--raised mdl-js-ripple-effect lowwdidth">
                         Drop files here or click to upload files
                         <input type="file" id="fileInputFiles" multiple="multiple" hidden onchange="handleFileSelect(event)">
                     </div>
-                    <div id="drop_zone_folders" class="drop-zone mdl-button mdl-js-button mdl-button--raised mdl-js-ripple-effect">
+                    <div id="drop_zone_folders" class="drop-zone mdl-button mdl-js-button mdl-button--raised mdl-js-ripple-effect lowwdidth">
                         Drop folder here or click to upload folder
                         <input type="file" id="fileInputFolders" webkitdirectory hidden onchange="handleFileSelect(event)">
                     </div>
@@ -161,6 +192,7 @@
                 </div>
             </main>
         </div>
+    </div>
 
         <script>
             const MAX_CONCURRENT_UPLOADS = 10;
