@@ -1,4 +1,6 @@
 from flask import Flask, request, jsonify, render_template, send_from_directory
+from cryptography.fernet import Fernet
+from werkzeug.datastructures import FileStorage
 import discord
 import os
 import aiohttp
@@ -11,21 +13,69 @@ from concurrent.futures import CancelledError
 import glob
 import argparse
 import csv
+import io
+
+
+
+if not os.path.isfile("encryptionkey.key"):
+
+    key = Fernet.generate_key()
+ 
+    # Write key in a file - !!! DON'T LOSE THE KEY OR THE FILES CAN'T BE DECRYPTED !!!
+    with open('encryptionkey.key', 'wb') as filekey:
+        filekey.write(key)
+
+
 
 app = Flask(__name__)
 
-BOT_TOKEN = 'YOUT BOT TOKEN' #Replace with your bot token
-CHANNEL_ID = 0 #Replace with your channel ID
+BOT_TOKEN = '' #Replace with your bot token
+CHANNEL_ID =  #Replace with your channel ID
 WEBPAGE_IP = '127.0.0.2'
 PORT = '5000'
 csv_file_path = 'message_cache.csv'
 NEW_MESSAGE_FETCH_WAIT_TIME = 10
 
-# Initialize Discord client outside the request handling
+checkbox_state = 0
+
+# Initialize Discord client
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
 client = discord.Client(intents=intents)
+
+def encryptfile(path : str):
+    with open('encryptionkey.key', 'rb') as filekey:
+        key = filekey.read()
+
+    fernet = Fernet(key)
+
+    with open(path, 'rb') as file:
+        original = file.read()
+
+    encrypted = fernet.encrypt(original)
+
+    with open(path, 'wb') as encrypted_file:
+        encrypted_file.write(encrypted)
+
+def decryptfiles(filen):
+    # Read the encryption key from the file
+    with open('encryptionkey.key', 'rb') as filekey:
+        key = filekey.read()
+
+    fernet = Fernet(key)
+
+    with open(download_folder + "/" + filen, 'rb') as enc_file:
+        encrypted = enc_file.read()
+
+    # Decrypt the file content
+    decrypted = fernet.decrypt(encrypted)
+
+    # Write the decrypted content back to the file
+    with open(download_folder + "/" + filen, 'wb') as dec_file:
+        dec_file.write(decrypted)
+
+    print("Decryption successful!")
 
 def search_csv_file(search_text, exclude_keywords, input_file=csv_file_path):
     matching_message_and_user_ids = []  # List to store matching message IDs and line numbers
@@ -33,9 +83,9 @@ def search_csv_file(search_text, exclude_keywords, input_file=csv_file_path):
     with open(input_file, mode='r', encoding='utf-8') as infile:
         reader = csv.reader(infile)
         found = False
-        # Iterate through each row in the CSV file, starting with line 2 (since the header is line 1)
+        # Iterate through each row in the CSV file
         for line_number, row in enumerate(reader, start=1):
-            # Extract the first 3 columns: message_id, timestamp, content
+            # Extract the first 3 columns: message_id, timestamp, user id, content
             message_id = row[0]
             timestamp = datetime.fromisoformat(row[1])
             user_id = row[2]
@@ -123,15 +173,16 @@ async def periodic_message_fetch():
             print(f"New messages after {last_timestamp} have been saved to {csv_file_path}")
         except Exception as e:
             print(f"Error in periodic fetch: {e}")
-        await asyncio.sleep(NEW_MESSAGE_FETCH_WAIT_TIME)  # Wait for 5 seconds before fetching again
+        await asyncio.sleep(NEW_MESSAGE_FETCH_WAIT_TIME)  # Wait for NEW_MESSAGE_FETCH_WAIT_TIME seconds before fetching again
 
 
 def stitch_files(directory, *,output_file : str, base_filename : str):
     # Ensure the directory ends with a slash
+    if ".encrypted" in output_file:
+        output_file.replace(".encrypted", "")
     if not directory.endswith(os.path.sep):
         directory += os.path.sep
 
-    # Initialize a list to hold the file parts
     parts = []
 
     # List all files in the directory and filter out the parts
@@ -142,9 +193,8 @@ def stitch_files(directory, *,output_file : str, base_filename : str):
     # Sort the parts by their part number
     parts.sort(key=lambda x: int(x.split('part')[-1]))
 
-    # Open the output file in write-binary mode
     with open(directory + output_file, 'wb') as output:
-        # Iterate over each part and append its contents to the output file
+        # Iterate over each part and append contents to output file
         for part in parts:
             with open(directory + part, 'rb') as f:
                 output.write(f.read())
@@ -155,6 +205,14 @@ def stitch_files(directory, *,output_file : str, base_filename : str):
             print(f"Deleted: {file_path}")
         except Exception as e:
             print(f"Error deleting {file_path}: {e}")
+
+    encrypted_files = glob.glob(os.path.join(download_folder, "*.encrypted"))
+
+    for file in encrypted_files:
+        new_name = file.replace(".encrypted", "")
+
+    os.rename(file, new_name)
+
     print(f"Stitched {len(parts)} parts into {output_file}")
 
 # Create the "downloaded" folder if it doesn't exist
@@ -163,7 +221,7 @@ if not os.path.exists(download_folder):
     os.makedirs(download_folder)
 
 async def search_message(*, query: str):
-    exclude_keywords = ["Sent", "Found", "Downloading", "!", "found", "Downloaded"]
+    exclude_keywords = []
     matching_message = search_csv_file(query, exclude_keywords)
     channel = client.get_channel(CHANNEL_ID)
     if matching_message:
@@ -173,7 +231,7 @@ async def search_message(*, query: str):
         timestamp= matching_message[0][1]
         await download_files_from(channel, timestamp, query=query)
     else:
-       print(f"No messages found with query: '{query}' (excluding the bot's messages)")
+       print(f"No messages found with query: '{query}'")
 
 async def download_files_from(channel, starting_message, *, query : str):
     async for message in channel.history(limit=None, after=starting_message):
@@ -189,8 +247,10 @@ async def download_files_from(channel, starting_message, *, query : str):
                             with open(file_path, "wb") as f:
                                 f.write(await resp.read())
         else:
-            modified_query = query.replace(" ", "_")
-            stitch_files("downloaded", output_file = query, base_filename = modified_query)
+            modified_query = query.replace(" ", "_").replace("(","").replace(")","")
+            if ".encrypted" in file_path:
+                decryptfiles(file_name)
+            stitch_files(download_folder, output_file = query, base_filename = modified_query)
             print("No more files found. Stopping the download process.")
             break
 
@@ -210,6 +270,17 @@ def store_click():
     if clicked_message:
         asyncio.run_coroutine_threadsafe(search_message(query=clicked_message), client.loop)
     return jsonify({'status': 'success', 'message': 'Message stored successfully'})
+
+@app.route('/submit_checkbox', methods=['POST'])
+def submit_checkbox():
+    global checkbox_state 
+    checkbox_state = int(request.form.get('checkbox1'))
+    
+    # Log or process the checkbox state
+    if checkbox_state == 1 :
+        print("Encryption is enabled")
+    else:
+        print("Encryption is disabled")
 
 lock = asyncio.Lock()
 
@@ -246,7 +317,32 @@ threading.Thread(target=start_discord_bot, daemon=True).start()
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    print(f"Checkbox state: {checkbox_state}")
+
+    # Access the uploaded file
     file = request.files['file']
+    # If the checkbox is checked (1), encrypt the file
+    if checkbox_state == 1:
+        filepath = os.path.join(download_folder, file.filename)
+    # Save the file to the file system
+        file.save(filepath)
+        file.seek(0)
+        print("Encrypting the file...")
+        encryptfile(filepath)
+
+        # Read the encrypted file into memory
+        with open(filepath, 'rb') as file_stream:
+            file_data = file_stream.read()
+
+        # Use io.BytesIO to keep the encrypted file in memory
+        memory_file = io.BytesIO(file_data)
+
+        # Create a new FileStorage object from the in-memory encrypted file
+        file = FileStorage(
+            stream=memory_file,
+            filename=file.filename
+        )
+        file.seek(0)
     # Ensure the Discord client is ready before attempting to send
     if not client.is_closed():
         try:
@@ -260,10 +356,11 @@ def upload_file():
             return jsonify({'error': str(e)}), 500
     return jsonify({'error': 'Discord client is closed.'}), 500
 
+
 cleaned_filename_copy = "sagsagfsdghfsfdsfsdfbgfruihhoibrojivefojbjcdbjscjbikorioighobvjefvbjk"
 
 async def send_file_to_discord(file):
-    channel = client.get_channel(CHANNEL_ID)  # Replace with your channel ID
+    channel = client.get_channel(CHANNEL_ID)
     retries = 5  # Set retry attempts
     wait_time = 5  # Wait time between retries in seconds
     await compare_and_update(file)
@@ -273,14 +370,21 @@ async def send_file_to_discord(file):
             # Send the file to Discord
             message = await channel.send(file=discord.File(file.stream, filename=file.filename))
             print(f"File {file.filename} uploaded successfully on attempt {attempt + 1}")
+            files_to_delete = glob.glob(os.path.join(download_folder, '*encrypted*'))
+            for file_path in files_to_delete:
+                try:
+                    os.remove(file_path)
+                    print(f"Deleted: {file_path}")
+                except Exception as e:
+                    print(f"Error deleting {file_path}: {e}")
             return message
         except discord.errors.HTTPException as e:
-            # Handle Discord API errors (e.g., rate limiting, 520 errors)
+            # Handle Discord API errors
             error_message = f"Error uploading file: {e}. Attempt {attempt + 1}/{retries}"
             print(error_message)
             logging.error(f"Failed to upload file: {file.filename}, Error: {e}, Attempt: {attempt + 1}/{retries}")
             if attempt < retries - 1:
-                time.sleep(wait_time)  # Wait before retrying
+                time.sleep(wait_time)
             else:
                 raise
         except Exception as e:
@@ -288,7 +392,7 @@ async def send_file_to_discord(file):
             print(error_message)
             logging.error(f"Unexpected failure for file: {file.filename}, Error: {e}, Attempt: {attempt + 1}/{retries}")
             if attempt < retries - 1:
-                time.sleep(wait_time)  # Wait before retrying
+                time.sleep(wait_time)
             else:
                 raise
 
