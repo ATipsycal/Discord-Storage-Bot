@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <html>
     <head>
+        <script>
+            // Declare a global variable in the <head> section
+            var state = '0'; // or '0'
+        </script>
         <!-- Material Design Lite -->
         <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap">
         <link rel="stylesheet" href="https://cdn.materialdesignicons.com/5.4.55/css/materialdesignicons.min.css">
@@ -188,11 +192,31 @@
                         </div>
                     </div>
 
+                    <div>
+                        <label for="checkbox1">Enable Encryption</label>
+                        <input type="checkbox" id="checkbox1" name="checkbox1" onchange="sendCheckboxState(this)">
+                    </div>
+
                     <span id="fileName" class="file-name"></span>
                 </div>
             </main>
         </div>
     </div>
+    
+    <script>
+        function sendCheckboxState(checkbox) {
+            // Create a new XMLHttpRequest object
+            var xhr = new XMLHttpRequest();
+            
+            // Prepare the request
+            xhr.open("POST", "/submit_checkbox", true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+
+            // Send the checkbox state ('checked' or 'unchecked')
+            state = checkbox.checked ? '1' : '0';
+            xhr.send("checkbox1=" + state);
+        }
+    </script>
 
         <script>
             const MAX_CONCURRENT_UPLOADS = 10;
@@ -286,7 +310,10 @@
             function uploadPart(part, originalFileName, partIndex, totalParts) {
                 return new Promise((resolve, reject) => {
                     let formData = new FormData();
-                    formData.append('file', part, `${originalFileName}.part${partIndex}`);
+                    var fileName = state === '1'
+                        ? `${originalFileName}.encrypted.part${partIndex}`
+                        : `${originalFileName}.part${partIndex}`;
+                    formData.append('file', part, fileName);
 
                     fetch('/upload', {
                         method: 'POST',
