@@ -290,7 +290,15 @@
             }
 
             async function uploadFileOrSplit(file) {
-                let chunkSize = 25 * 1024 * 1024; // 25 MB discord file size limit (for now >:(    )
+                let chunkSize;
+
+                if (state === '1') {
+                    chunkSize = 16 * 1024 * 1024; // 16 MB file size limit to account for encryption overhead
+                } 
+                else {
+                    chunkSize = 25 * 1024 * 1024; // 25 MB Discord file size limit
+                }
+
                 let parts = file.size > chunkSize ? splitFile(file, chunkSize) : [file];
                 totalParts = parts.length;
                 partsUploaded = 0;

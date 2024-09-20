@@ -64,18 +64,21 @@ def decryptfiles(filen):
         key = filekey.read()
 
     fernet = Fernet(key)
+    files_to_decrypt = glob.glob(os.path.join(download_folder, '*.part*'))
+    for file_path in files_to_decrypt:
+        try:
+            with open(file_path, 'rb') as enc_file:
+                encrypted = enc_file.read()
 
-    with open(download_folder + "/" + filen, 'rb') as enc_file:
-        encrypted = enc_file.read()
+        # Decrypt the file content
+            decrypted = fernet.decrypt(encrypted)
 
-    # Decrypt the file content
-    decrypted = fernet.decrypt(encrypted)
-
-    # Write the decrypted content back to the file
-    with open(download_folder + "/" + filen, 'wb') as dec_file:
-        dec_file.write(decrypted)
-
-    print("Decryption successful!")
+        # Write the decrypted content back to the file
+            with open(file_path, 'wb') as dec_file:
+                dec_file.write(decrypted)
+            print("Decryption successful!")
+        except:
+            print("Error during decryption!")
 
 def search_csv_file(search_text, exclude_keywords, input_file=csv_file_path):
     matching_message_and_user_ids = []  # List to store matching message IDs and line numbers
@@ -178,8 +181,6 @@ async def periodic_message_fetch():
 
 def stitch_files(directory, *,output_file : str, base_filename : str):
     # Ensure the directory ends with a slash
-    if ".encrypted" in output_file:
-        output_file.replace(".encrypted", "")
     if not directory.endswith(os.path.sep):
         directory += os.path.sep
 
@@ -220,6 +221,11 @@ download_folder = os.path.join(os.getcwd(), "downloaded")
 if not os.path.exists(download_folder):
     os.makedirs(download_folder)
 
+# Create the "uploaded" folder if it doesn't exist    
+upload_folder = os.path.join(os.getcwd(), "uploaded")
+if not os.path.exists(upload_folder):
+    os.makedirs(upload_folder)
+
 async def search_message(*, query: str):
     exclude_keywords = []
     matching_message = search_csv_file(query, exclude_keywords)
@@ -247,10 +253,13 @@ async def download_files_from(channel, starting_message, *, query : str):
                             with open(file_path, "wb") as f:
                                 f.write(await resp.read())
         else:
-            modified_query = query.replace(" ", "_").replace("(","").replace(")","")
+            tempFileName = file_name.split(".part")
+            file_name = tempFileName[0]
             if ".encrypted" in file_path:
-                decryptfiles(file_name)
-            stitch_files(download_folder, output_file = query, base_filename = modified_query)
+                    decryptfiles(file_name)
+                    tempFileName = file_name.split(".encrypted")
+                    file_name = tempFileName[0]
+            stitch_files(download_folder, output_file = query, base_filename = file_name)
             print("No more files found. Stopping the download process.")
             break
 
@@ -315,15 +324,19 @@ async def compare_and_update(file):
 # Run Discord client in a background thread
 threading.Thread(target=start_discord_bot, daemon=True).start()
 
+upload_queue = 0
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    global upload_queue
     print(f"Checkbox state: {checkbox_state}")
 
     # Access the uploaded file
     file = request.files['file']
+    upload_queue += 1
     # If the checkbox is checked (1), encrypt the file
     if checkbox_state == 1:
-        filepath = os.path.join(download_folder, file.filename)
+        filepath = os.path.join(upload_folder, file.filename)
     # Save the file to the file system
         file.save(filepath)
         file.seek(0)
@@ -343,6 +356,7 @@ def upload_file():
             filename=file.filename
         )
         file.seek(0)
+        print (file.filename)
     # Ensure the Discord client is ready before attempting to send
     if not client.is_closed():
         try:
@@ -360,6 +374,7 @@ def upload_file():
 cleaned_filename_copy = "sagsagfsdghfsfdsfsdfbgfruihhoibrojivefojbjcdbjscjbikorioighobvjefvbjk"
 
 async def send_file_to_discord(file):
+    global upload_queue
     channel = client.get_channel(CHANNEL_ID)
     retries = 5  # Set retry attempts
     wait_time = 5  # Wait time between retries in seconds
@@ -370,14 +385,7 @@ async def send_file_to_discord(file):
             # Send the file to Discord
             message = await channel.send(file=discord.File(file.stream, filename=file.filename))
             print(f"File {file.filename} uploaded successfully on attempt {attempt + 1}")
-            files_to_delete = glob.glob(os.path.join(download_folder, '*encrypted*'))
-            for file_path in files_to_delete:
-                try:
-                    os.remove(file_path)
-                    print(f"Deleted: {file_path}")
-                except Exception as e:
-                    print(f"Error deleting {file_path}: {e}")
-            return message
+            break
         except discord.errors.HTTPException as e:
             # Handle Discord API errors
             error_message = f"Error uploading file: {e}. Attempt {attempt + 1}/{retries}"
@@ -395,6 +403,18 @@ async def send_file_to_discord(file):
                 time.sleep(wait_time)
             else:
                 raise
+    upload_queue -= 1  # Decrement queue counter after each successful upload
+    print (upload_queue)
+    # Once all files are uploaded, send a final message
+    if upload_queue == 0:
+        files_to_delete = glob.glob(os.path.join(upload_folder, '*part*'))
+        for file_path in files_to_delete:
+            try:
+                os.remove(file_path)
+                print(f"Deleted: {file_path}")
+            except Exception as e:
+                print(f"Error deleting {file_path}: {e}")
+        await channel.send("All files have been uploaded successfully!")
 
 if __name__ == '__main__':
     app.run(port = PORT, host = WEBPAGE_IP)
